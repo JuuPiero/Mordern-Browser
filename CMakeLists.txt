@@ -31,6 +31,7 @@ pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 # --- vendored, trimmed third-party sources ----------------------------------
 add_subdirectory(Vendor/lexbor)
 add_subdirectory(Vendor/quickjs)
+add_subdirectory(Vendor/litehtml)
 
 # --- MordernBrowser ----------------------------------------------------------
 file(GLOB_RECURSE MORDERNBROWSER_SOURCES CONFIGURE_DEPENDS
@@ -47,6 +48,7 @@ target_include_directories(MordernBrowser PRIVATE
 target_link_libraries(MordernBrowser PRIVATE
     citro2d
     citro3d
+    litehtml
     lexbor
     quickjs
     PkgConfig::CURL
@@ -60,4 +62,5 @@ target_link_libraries(MordernBrowser PRIVATE
 ctr_create_3dsx(MordernBrowser
     NAME "MordernBrowser"
     DESCRIPTION "A modern-ish web browser for the Nintendo 3DS"
+    ROMFS "${CMAKE_CURRENT_SOURCE_DIR}/Assets/romfs"
 )
