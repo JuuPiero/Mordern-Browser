@@ -6,17 +6,20 @@
 #include <citro2d.h>
 
 #include "Core/BrowserApp.h"
-#include "Platform/N3DS/ContentRenderer.h"
+#include "Platform/N3DS/HtmlContainer.h"
 
 namespace Platform::N3DS {
 
 // The bottom-screen touch UI: tab strip, address bar, Back/Forward/Reload,
-// and a touch surface that scrolls/taps the active tab's content (which is
-// rendered full-size on the top screen by `content`). Owns all input
-// handling for the app other than the global Start-to-exit check in main().
+// and a touch surface that scrolls/taps the active tab's content (rendered
+// full-size on the top screen straight from its litehtml document). Owns
+// all input handling for the app other than the global Start-to-exit check
+// in main(). Link taps are routed through litehtml's own hit-testing
+// (document::on_lbutton_down/up), via `container`, rather than reimplementing
+// it here.
 class Chrome {
 public:
-    Chrome(Core::BrowserApp &app, ContentRenderer &content);
+    Chrome(Core::BrowserApp &app, HtmlContainer &container, C2D_Font font);
 
     // Reads the current touch/button state (call after hidScanInput()) and
     // acts on it directly against `app` (navigate, switch tabs, scroll...).
@@ -44,7 +47,8 @@ private:
     void DrawContentTouchpad();
 
     Core::BrowserApp &app_;
-    ContentRenderer &content_;
+    HtmlContainer &container_;
+    C2D_Font font_;
 
     C2D_TextBuf textBuf_;
 

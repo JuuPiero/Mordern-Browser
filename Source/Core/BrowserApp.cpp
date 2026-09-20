@@ -1,5 +1,7 @@
 #include "Core/BrowserApp.h"
 
+#include <litehtml/document.h>
+
 #include "Core/Url.h"
 
 namespace Core {
@@ -11,8 +13,8 @@ const char *const kHomePageHtml = R"HTML(
 <!doctype html>
 <html>
 <head><title>New tab</title></head>
-<body>
-<h1>MordernBrowser</h1>
+<body style="background:#20242b;color:#d6d6d6;font-family:sans-serif;padding:16px;">
+<h1 style="color:#fff;">MordernBrowser</h1>
 <p>Tap the address bar below to go somewhere.</p>
 <p>Some starting points:</p>
 <ul>
@@ -26,8 +28,12 @@ const char *const kHomePageHtml = R"HTML(
 
 }  // namespace
 
-BrowserApp::BrowserApp(INetworkClient &network, ITextMeasurer &measurer, float contentWidth)
-    : network_(network), measurer_(measurer), contentWidth_(contentWidth) {}
+BrowserApp::BrowserApp(INetworkClient &network, litehtml::document_container &container,
+                        std::function<std::string()> takeTitle, float contentWidth)
+    : network_(network),
+      container_(container),
+      takeTitle_(std::move(takeTitle)),
+      contentWidth_(contentWidth) {}
 
 int BrowserApp::NewTab(const std::string &startUrl) {
     tabs_.push_back(std::make_unique<Tab>());
@@ -42,11 +48,14 @@ int BrowserApp::NewTab(const std::string &startUrl) {
 }
 
 void BrowserApp::LoadHomePage(Tab &tab, bool pushHistory) {
-    HtmlDocument document;
-    document.Parse(kHomePageHtml);
-    std::string title = document.Title();
-    LayoutResult layout = BuildLayout(document, contentWidth_, measurer_);
-    tab.SetLoaded("about:home", std::move(title), std::move(document), std::move(layout));
+    litehtml::document::ptr doc = litehtml::document::createFromString(kHomePageHtml, &container_);
+    std::string title = takeTitle_();
+    float height = 0.0f;
+    if (doc) {
+        doc->render(contentWidth_);
+        height = static_cast<float>(doc->height());
+    }
+    tab.SetLoaded("about:home", std::move(title), std::move(doc), height);
     if (pushHistory) {
         tab.PushHistory("about:home");
     }
@@ -139,18 +148,20 @@ void BrowserApp::PerformLoad(Tab &tab, const std::string &url, bool pushHistory,
         return;
     }
 
-    HtmlDocument document;
-    if (!document.Parse(fetch.body)) {
-        tab.SetError(fetch.finalUrl, "Failed to parse page");
-        recordHistory(url);
+    const std::string finalUrl = fetch.finalUrl.empty() ? url : fetch.finalUrl;
+
+    litehtml::document::ptr doc = litehtml::document::createFromString(fetch.body, &container_);
+    if (!doc) {
+        tab.SetError(finalUrl, "Failed to parse page");
+        recordHistory(finalUrl);
         return;
     }
 
-    std::string title = document.Title();
-    LayoutResult layout = BuildLayout(document, contentWidth_, measurer_);
+    std::string title = takeTitle_();
+    doc->render(contentWidth_);
+    float height = static_cast<float>(doc->height());
 
-    const std::string finalUrl = fetch.finalUrl.empty() ? url : fetch.finalUrl;
-    tab.SetLoaded(finalUrl, std::move(title), std::move(document), std::move(layout));
+    tab.SetLoaded(finalUrl, std::move(title), std::move(doc), height);
     recordHistory(finalUrl);
 }
 

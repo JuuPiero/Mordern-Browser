@@ -1,30 +1,31 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "Core/HtmlDocument.h"
-#include "Core/Layout.h"
+#include <litehtml/document.h>
 
 namespace Core {
 
 // One browser tab's state: where it is in its own history, what's currently
-// loaded, and how that page was laid out. Tab does not know how to fetch or
-// parse a page — BrowserApp owns that pipeline and pushes results in here —
-// which keeps Tab a plain, easily-inspected piece of state.
+// loaded, and its litehtml document (layout + CSS box tree already
+// computed). Tab does not know how to fetch a page or how to paint one --
+// BrowserApp owns the fetch pipeline and pushes results in here, and
+// Platform/N3DS paints document() -- which keeps Tab a plain, easily
+// inspected piece of state.
 class Tab {
 public:
     const std::string &Url() const { return url_; }
     const std::string &Title() const { return title_.empty() ? url_ : title_; }
-    const LayoutResult &Layout() const { return layout_; }
+    const litehtml::document::ptr &Document() const { return document_; }
+    float ContentHeight() const { return contentHeight_; }
     bool IsLoading() const { return loading_; }
     bool HasError() const { return !error_.empty(); }
     const std::string &Error() const { return error_; }
 
-    // Bumped every time SetLoaded()/SetError() replace the page. The
-    // platform's content renderer uses this (paired with the active tab
-    // index) to know when it needs to re-parse text for drawing rather than
-    // doing it every frame.
+    // Bumped every time SetLoaded()/SetError() replace the page, so the
+    // platform's renderer knows when it needs to re-render vs. redraw.
     int Generation() const { return generation_; }
 
     float ScrollY() const { return scrollY_; }
@@ -50,14 +51,14 @@ public:
         url_ = url;
     }
 
-    void SetLoaded(const std::string &url, std::string title, HtmlDocument document,
-                    LayoutResult layout) {
+    void SetLoaded(const std::string &url, std::string title, litehtml::document::ptr document,
+                    float contentHeight) {
         loading_ = false;
         error_.clear();
         url_ = url;
         title_ = std::move(title);
         document_ = std::move(document);
-        layout_ = std::move(layout);
+        contentHeight_ = contentHeight;
         scrollY_ = 0.0f;
         ++generation_;
     }
@@ -66,7 +67,8 @@ public:
         loading_ = false;
         url_ = url;
         error_ = std::move(error);
-        layout_ = LayoutResult{};
+        document_.reset();
+        contentHeight_ = 0.0f;
         scrollY_ = 0.0f;
         ++generation_;
     }
@@ -74,8 +76,8 @@ public:
 private:
     std::string url_;
     std::string title_;
-    HtmlDocument document_;
-    LayoutResult layout_;
+    litehtml::document::ptr document_;
+    float contentHeight_ = 0.0f;
     float scrollY_ = 0.0f;
     bool loading_ = false;
     std::string error_;

@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdio>
 
-#include "Core/Layout.h"
 #include "Core/Url.h"
 #include "Platform/N3DS/Keyboard.h"
 
@@ -43,7 +42,8 @@ std::string Truncate(const std::string &text, size_t maxLen) {
 
 }  // namespace
 
-Chrome::Chrome(Core::BrowserApp &app, ContentRenderer &content) : app_(app), content_(content) {
+Chrome::Chrome(Core::BrowserApp &app, HtmlContainer &container, C2D_Font font)
+    : app_(app), container_(container), font_(font) {
     textBuf_ = C2D_TextBufNew(1024);
 }
 
@@ -162,22 +162,30 @@ void Chrome::HandleContentTouch(const touchPosition &pos, bool dragging) {
         return;
     }
     Core::Tab &tab = app_.ActiveTab();
+    if (!tab.Document()) {
+        return;
+    }
 
     if (dragging) {
         float dy = static_cast<float>(pos.py) - static_cast<float>(touchLast_.py);
         float scale = kTopScreenH / contentTouch_.h;
-        float maxScroll = std::max(0.0f, tab.Layout().contentHeight - kTopScreenH);
+        float maxScroll = std::max(0.0f, tab.ContentHeight() - kTopScreenH);
         float newScroll = std::min(maxScroll, std::max(0.0f, tab.ScrollY() - dy * scale));
         tab.SetScrollY(newScroll);
         return;
     }
 
-    // A tap (not a drag): hit-test the corresponding point in content space.
+    // A tap (not a drag): let litehtml do its own hit-testing against the
+    // render tree (it calls our container's on_anchor_click for us).
     float contentX = 0.0f, contentY = 0.0f;
     MapToContent(static_cast<float>(pos.px), static_cast<float>(pos.py), &contentX, &contentY);
     contentY += tab.ScrollY();
 
-    std::string href = Core::HitTestLink(tab.Layout(), contentX, contentY);
+    auto noRedraw = [](const litehtml::position &) {};
+    tab.Document()->on_lbutton_down(contentX, contentY, contentX, contentY, noRedraw);
+    tab.Document()->on_lbutton_up(contentX, contentY, contentX, contentY, noRedraw);
+
+    std::string href = container_.TakeClickedHref();
     if (!href.empty()) {
         std::string resolved = Core::ResolveUrl(href, tab.Url());
         app_.Navigate(app_.ActiveTabIndex(), resolved.empty() ? href : resolved);
@@ -208,7 +216,7 @@ void Chrome::DrawTabStrip(float scale) {
             label = "New tab";
         }
         C2D_Text text;
-        C2D_TextParse(&text, textBuf_, label.c_str());
+        C2D_TextFontParse(&text, font_, textBuf_, label.c_str());
         C2D_TextOptimize(&text);
         C2D_DrawText(&text, C2D_WithColor, chip.x + 4.0f, chip.y + 5.0f, 0.35f, scale, scale,
                      kTextColor);
@@ -217,7 +225,7 @@ void Chrome::DrawTabStrip(float scale) {
     C2D_DrawRectSolid(newTabButton_.x, newTabButton_.y, 0.3f, newTabButton_.w, newTabButton_.h,
                       kButtonBg);
     C2D_Text plus;
-    C2D_TextParse(&plus, textBuf_, "+");
+    C2D_TextFontParse(&plus, font_, textBuf_, "+");
     C2D_TextOptimize(&plus);
     C2D_DrawText(&plus, C2D_WithColor, newTabButton_.x + 8.0f, newTabButton_.y + 4.0f, 0.35f, 0.55f,
                  0.55f, kTextColor);
@@ -237,9 +245,9 @@ void Chrome::DrawNavButtons(float scale) {
 
     C2D_TextBufClear(textBuf_);
     C2D_Text back, forward, reload;
-    C2D_TextParse(&back, textBuf_, "<");
-    C2D_TextParse(&forward, textBuf_, ">");
-    C2D_TextParse(&reload, textBuf_, "R");
+    C2D_TextFontParse(&back, font_, textBuf_, "<");
+    C2D_TextFontParse(&forward, font_, textBuf_, ">");
+    C2D_TextFontParse(&reload, font_, textBuf_, "R");
     C2D_TextOptimize(&back);
     C2D_TextOptimize(&forward);
     C2D_TextOptimize(&reload);
@@ -264,7 +272,7 @@ void Chrome::DrawAddressBar(float scale) {
 
     C2D_TextBufClear(textBuf_);
     C2D_Text text;
-    C2D_TextParse(&text, textBuf_, label.empty() ? "Tap to enter an address" : label.c_str());
+    C2D_TextFontParse(&text, font_, textBuf_, label.empty() ? "Tap to enter an address" : label.c_str());
     C2D_TextOptimize(&text);
     C2D_DrawText(&text, C2D_WithColor, addressBar_.x + 6.0f, addressBar_.y + 9.0f, 0.35f, scale,
                  scale, label.empty() ? kHintColor : kTextColor);
@@ -280,7 +288,7 @@ void Chrome::DrawContentTouchpad() {
 
     C2D_TextBufClear(textBuf_);
     C2D_Text hint;
-    C2D_TextParse(&hint, textBuf_, "Drag to scroll * tap to follow a link");
+    C2D_TextFontParse(&hint, font_, textBuf_, "Drag to scroll * tap to follow a link");
     C2D_TextOptimize(&hint);
     C2D_DrawText(&hint, C2D_WithColor, contentTouch_.x + 8.0f, contentTouch_.y + 8.0f, 0.35f, 0.35f,
                  0.35f, kHintColor);

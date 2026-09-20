@@ -1,22 +1,31 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <litehtml/document_container.h>
+
 #include "Core/INetworkClient.h"
-#include "Core/ITextMeasurer.h"
 #include "Core/Tab.h"
 
 namespace Core {
 
-// Owns every tab and the fetch -> parse -> layout pipeline. This is the one
-// class Platform/N3DS's UI code talks to; it never touches libcurl, citro2d,
-// or lexbor directly itself (those are behind INetworkClient/ITextMeasurer,
-// or wrapped by HtmlDocument/Layout).
+// Owns every tab and the fetch -> parse -> render pipeline. This is the one
+// class Platform/N3DS's UI code talks to; it never touches libcurl directly
+// (that's behind INetworkClient) or litehtml's HTML/CSS internals directly
+// (layout is litehtml's job -- BrowserApp just calls document::render()).
+//
+// `container` is litehtml's abstract document_container, not a concrete
+// Platform type, so this stays free of any 3DS/citro2d dependency; the one
+// thing litehtml can't hand back through that interface is the page title,
+// which is why `takeTitle` is injected separately (Platform's container
+// implementation captures it from set_caption() and hands it over here).
 class BrowserApp {
 public:
-    BrowserApp(INetworkClient &network, ITextMeasurer &measurer, float contentWidth);
+    BrowserApp(INetworkClient &network, litehtml::document_container &container,
+               std::function<std::string()> takeTitle, float contentWidth);
 
     // Returns the new tab's index.
     int NewTab(const std::string &startUrl = std::string());
@@ -59,7 +68,8 @@ private:
     void LoadHomePage(Tab &tab, bool pushHistory);
 
     INetworkClient &network_;
-    ITextMeasurer &measurer_;
+    litehtml::document_container &container_;
+    std::function<std::string()> takeTitle_;
     float contentWidth_;
     std::vector<std::unique_ptr<Tab>> tabs_;
     int activeTab_ = -1;

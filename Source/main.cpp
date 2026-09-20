@@ -2,18 +2,21 @@
 //
 // This is the only file that constructs concrete Platform::N3DS types and
 // wires them into Core::BrowserApp -- see the layering note at the top of
-// Include/Core and Include/Platform/N3DS for why the split exists.
+// Include/Core and Include/Platform/N3DS for why the split exists. Page
+// layout/CSS is litehtml's job (Vendor/litehtml); HtmlContainer is our
+// citro2d-only drawing backend for it.
 
 #include <3ds.h>
 #include <citro2d.h>
 #include <citro3d.h>
 #include <cstdio>
 
+#include <litehtml/document.h>
+
 #include "Core/BrowserApp.h"
-#include "Platform/N3DS/C2DTextMeasurer.h"
 #include "Platform/N3DS/Chrome.h"
-#include "Platform/N3DS/ContentRenderer.h"
 #include "Platform/N3DS/CurlNetworkClient.h"
+#include "Platform/N3DS/HtmlContainer.h"
 
 // This QuickJS fork calls debug_log() unconditionally during engine init;
 // the host must provide it. Page scripting isn't wired up yet (see
@@ -40,17 +43,18 @@ int main() {
     C3D_RenderTarget *top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
     C3D_RenderTarget *bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
 
-    Platform::N3DS::C2DTextMeasurer measurer;
-    Platform::N3DS::CurlNetworkClient network("romfs:/cacert.pem");
+    C2D_Font font = C2D_FontLoad("romfs:/font.bcfnt");  // DejaVu Sans w/ Vietnamese glyphs; see Assets/romfs
 
-    Core::BrowserApp app(network, measurer, kTopScreenWidth);
-    Platform::N3DS::ContentRenderer content;
-    Platform::N3DS::Chrome chrome(app, content);
+    Platform::N3DS::CurlNetworkClient network("romfs:/cacert.pem");
+    Platform::N3DS::HtmlContainer container(font, network);
+
+    Core::BrowserApp app(
+        network, container, [&container] { return container.TakePageTitle(); }, kTopScreenWidth);
+    Platform::N3DS::Chrome chrome(app, container, font);
 
     app.NewTab();  // opens the built-in home page
 
-    int renderedTab = -1;
-    int renderedGeneration = -1;
+    litehtml::position clip{0, 0, kTopScreenWidth, kTopScreenHeight};
 
     while (aptMainLoop()) {
         hidScanInput();
@@ -60,27 +64,20 @@ int main() {
 
         chrome.HandleInput();
 
-        if (app.HasActiveTab()) {
-            const Core::Tab &tab = app.ActiveTab();
-            if (app.ActiveTabIndex() != renderedTab || tab.Generation() != renderedGeneration) {
-                content.SetLayout(tab.Layout());
-                renderedTab = app.ActiveTabIndex();
-                renderedGeneration = tab.Generation();
-            }
-        }
-
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
         if (!app.HasActiveTab()) {
-            content.DrawMessage(top, "No tabs open", kTopScreenWidth, kTopScreenHeight);
+            C2D_TargetClear(top, C2D_Color32(0x2b, 0x24, 0x20, 0xFF));
+            C2D_SceneBegin(top);
         } else {
             const Core::Tab &tab = app.ActiveTab();
+            C2D_TargetClear(top, C2D_Color32(0x2b, 0x24, 0x20, 0xFF));
+            C2D_SceneBegin(top);
             if (tab.IsLoading()) {
-                content.DrawMessage(top, "Loading...", kTopScreenWidth, kTopScreenHeight);
-            } else if (tab.HasError()) {
-                content.DrawMessage(top, tab.Error(), kTopScreenWidth, kTopScreenHeight);
-            } else {
-                content.Draw(top, tab.ScrollY(), kTopScreenWidth, kTopScreenHeight);
+                // Nothing drawn yet this load -- the cleared background is
+                // the whole "Loading..." state for now.
+            } else if (!tab.HasError() && tab.Document()) {
+                tab.Document()->draw(0, 0, -tab.ScrollY(), &clip);
             }
         }
 
@@ -94,6 +91,9 @@ int main() {
         app.ProcessPendingNavigation();
     }
 
+    if (font != nullptr) {
+        C2D_FontFree(font);
+    }
     C2D_Fini();
     C3D_Fini();
     gfxExit();
